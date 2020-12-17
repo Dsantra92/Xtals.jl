@@ -22,6 +22,8 @@ BondingRule(species_i::String, species_j::String, min_dist::String,
     max_dist::String) = BondingRule(Symbol.([species_i, species_j])...,
         parse.([Float64, Float64], [min_dist, max_dist])...)
 
+convert(BondingRule, t::Tuple{Symbol, Symbol, Float64, Float64}) = BondingRule(t...)
+
 
 """
 Global BondingRule array
@@ -180,6 +182,8 @@ function is_bonded(crystal::Crystal, i::Int64, j::Int64, bonding_rules::Array{Bo
     species_i = crystal.atoms.species[i]
     species_j = crystal.atoms.species[j]
     r = distance(crystal.atoms, crystal.box, i, j, include_bonds_across_periodic_boundaries)
+    cross_boundary = nothing
+    bonded = nothing
     # loop over possible bonding rules
     for br in bonding_rules
         # determine if the atom species correspond to the species in `bonding_rules`
@@ -196,13 +200,19 @@ function is_bonded(crystal::Crystal, i::Int64, j::Int64, bonding_rules::Array{Bo
         if species_match
             # determine if the atoms are close enough to bond
             if br.min_dist < r && br.max_dist > r
-                return true
+                bonded = true
+                break
             else
-                return false # found relevant bonding rule, don't apply others
+                bonded = false # found relevant bonding rule, don't apply others
+                break
             end
         end
     end
-    return false # no bonding rule applied
+    if bonded && include_bonds_across_periodic_boundaries
+        cross_boundary = !isapprox(r,
+            distance(crystal.atoms.coords, crystal.box, i, j, false))
+    end
+    return bonded, cross_boundary
 end
 
 
@@ -248,9 +258,14 @@ function infer_bonds!(crystal::Crystal, include_bonds_across_periodic_boundaries
     for i in 1:crystal.atoms.n
         # loop over every unique pair of atoms
         for j in i+1:crystal.atoms.n
-            if is_bonded(crystal, i, j, bonding_rules;
+            bonded, cross_pb = is_bonded(crystal, i, j, bonding_rules;
                 include_bonds_across_periodic_boundaries=include_bonds_across_periodic_boundaries)
-                make_bond!(crystal, i, j)
+            if bonded
+                if !isnothing(cross_pb)
+                    make_bond!(crystal, i, j, cross_boundary=cross_pb)
+                else
+                    make_bond!(crystal, i, j)
+                end
             end
         end
     end
@@ -497,23 +512,28 @@ write_bond_information(crystal::Crystal; center_at_origin::Bool=false) =
     make_bond!(xtal.bonds, i, j)
 Creates a bond between the `i`th and `j` atoms
 """
-function make_bond!(bonds::MetaGraph, i::Int, j::Int, coords::Frac;
-        box::Union{Box,Nothing}=nothing, type::Symbol=:single)
+function make_bond!(bonds::MetaGraph, i::Int, j::Int;
+        cross_boundary::Union{Bool, Nothing}=nothing,
+        type::Union{Symbol, Nothing}=nothing,
+        bond_distance::Union{Float64, Nothing}=nothing)
     add_edge!(bonds, i, j)
-    set_prop!(bonds, i, j, :type, type)
-    if !isnothing(box)
-        dist = distance(coords, box, i, j, true)
-        set_prop!(bonds, i, j, :cross_boundary,
-            !isapprox(distance(coords, box, i, j, false), dist))
-        set_prop!(bonds, i, j, :distance, dist)
-    else # no box when reading bonds from file
-        set_prop!(bonds, i, j, :cross_boundary, missing)
-        set_prop!(bonds, i, j, :distance, missing)
+    if !isnothing(type)
+        set_prop!(bonds, i, j, :type, type)
+    end
+    if !isnothing(cross_boundary)
+        set_prop!(bonds, i, j, :cross_boundary, cross_boundary)
+    end
+    if !isnothing(bond_distance)
+        set_prop!(bonds, i, j, :distance, bond_distance)
     end
 end
 
-make_bond!(xtal::Crystal, i::Int, j::Int, kwargs...) =
-    make_bond!(xtal.bonds, i, j, xtal.atoms.coords, box=xtal.box, kwargs...)
+make_bond!(xtal::Crystal, i::Int, j::Int;
+    cross_boundary::Union{Bool, Nothing}=nothing,
+    type::Union{Symbol, Nothing}=nothing,
+    bond_distance::Union{Float64, Nothing}=nothing) =
+        make_bond!(xtal.bonds, i, j, cross_boundary=cross_boundary,
+        type=type, bond_distance=bond_distance)
 
 
 """
@@ -521,7 +541,7 @@ Loop through xtal and calculate any missing distances
 """
 function calc_missing_bond_distances!(xtal::Crystal)
     for bond in collect(edges(xtal.bonds))
-        if ismissing(get_prop(xtal.bonds, bond, :distance))
+        if !has_prop(xtal.bonds, bond, :distance)
             i = src(bond)
             j = dst(bond)
             set_prop!(xtal.bonds, i, j, :distance, distance(xtal.atoms, xtal.box, i, j, true))

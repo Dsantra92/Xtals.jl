@@ -1040,7 +1040,11 @@ function Base.getindex(crystal::Crystal,
     bonds = MetaGraph(length(ids))
     for edge in collect(edges(crystal.bonds))
         if edge.src in ids && edge.dst in ids
-            make_bond!(bonds, old_to_new[edge.src], old_to_new[edge.dst], crystal.atoms.coords)
+            cross_boundary = has_prop(crystal.bonds, edge, :cross_boundary) ? get_prop(crystal.bonds, edge, :cross_boundary) : nothing
+            type = has_prop(crystal.bonds, edge, :type) ? get_prop(crystal.bonds, edge, :type) : nothing
+            bond_distance = has_prop(crystal.bonds, edge, :distance) ? get_prop(crystal.bonds, edge, :distance) : nothing
+            make_bond!(bonds, old_to_new[edge.src], old_to_new[edge.dst],
+                cross_boundary=cross_boundary, type=type, bond_distance=bond_distance)
         end
     end
     if crystal.charges.n == 0
