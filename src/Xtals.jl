@@ -2,6 +2,8 @@ module Xtals
 
 using CSV, DataFrames, Printf, LinearAlgebra, LightGraphs, PyCall, MetaGraphs
 
+import Base.convert
+
 # atoms are considered to overlap if this close.
 const R²_OVERLAP = 0.1 # Units: Angstrom²
 
@@ -72,7 +74,7 @@ include("box.jl")
 include("crystal.jl")
 include("distance.jl")
 include("misc.jl")
-include("cordero.jl")
+include("bond_distances.jl")
 include("bonds.jl")
 include("repfactors.jl")
 include("atomic_masses.jl")
@@ -83,7 +85,7 @@ include("cpk_colors.jl")
 function __init__()
     # if the user changes directory, path_to_data will change as well
     set_default_file_paths(print_paths=false)
-    # set the default bonding rules from internal cordero parameters
+    # set the default bonding rules from internal bond_distances parameters
     set_bonding_rules(bondingrules()) # wanted to precompile, but didn't work
 end
 
